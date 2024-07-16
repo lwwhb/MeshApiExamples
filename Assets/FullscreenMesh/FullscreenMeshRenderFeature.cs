@@ -6,19 +6,27 @@ using UnityEngine.Rendering.Universal;
 public class FullscreenMeshRenderFeature : ScriptableRendererFeature
 {
     public Material passMaterial;
+    public ComputeShader computeShader;
     class FullscreenMeshRenderPass : ScriptableRenderPass
     {
         private const int kTileSize = 16;
         private Mesh fullscreenMesh { get; set; }
         private GraphicsBuffer bufferPos;
         
-        public Material drawFullscreenMeshMaterial;
+        private Material drawFullscreenMeshMaterial;
+        private ComputeShader computeShader;
 
-        public FullscreenMeshRenderPass( Material passMaterial )
+        private int tileNumX;
+        private int tileNumY;
+
+        private RenderTexture debugComputeOutput = null;
+        
+
+        public FullscreenMeshRenderPass( Material passMaterial, ComputeShader shader )
         {
             profilingSampler = new ProfilingSampler(nameof(FullscreenMeshRenderPass));
             drawFullscreenMeshMaterial = passMaterial;
-            
+            computeShader = shader;
         }
         
         // This method is called before executing the render pass.
@@ -28,14 +36,21 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
         // The render pipeline will ensure target setup and clearing happens in a performant manner.
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
+            CameraData cameraData = renderingData.cameraData;
             if (fullscreenMesh == null)
             {
-                CameraData cameraData = renderingData.cameraData;
                 float nearClipZ = -1;
                 if (SystemInfo.usesReversedZBuffer)
                     nearClipZ = 1;
                 fullscreenMesh = CreateFullscreenMesh(cameraData.camera.pixelWidth, cameraData.camera.pixelHeight,
                     nearClipZ);
+            }
+
+            if (debugComputeOutput == null)
+            {
+                debugComputeOutput = new RenderTexture(cameraData.camera.pixelWidth, cameraData.camera.pixelHeight, 24);
+                debugComputeOutput.enableRandomWrite = true;
+                debugComputeOutput.Create();
             }
         }
 
@@ -49,9 +64,9 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
             CommandBuffer cmd = CommandBufferPool.Get();
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                CoreUtils.SetRenderTarget(cmd, cameraData.renderer.cameraColorTargetHandle);
-
-                cmd.DrawMesh(fullscreenMesh, Matrix4x4.identity, drawFullscreenMeshMaterial);
+                UpdateMeshWithGPU(cmd, cameraData.renderer.cameraDepthTargetHandle);
+                cmd.Blit(debugComputeOutput, cameraData.renderer.cameraColorTargetHandle);
+                //cmd.DrawMesh(fullscreenMesh, Matrix4x4.identity, drawFullscreenMeshMaterial);
             }
             context.ExecuteCommandBuffer(cmd);
             CommandBufferPool.Release(cmd);
@@ -76,21 +91,20 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
         private Mesh CreateFullscreenMesh(int width, int height, float nearZ)
         {
             Debug.Assert((width % kTileSize == 0) && (height % kTileSize == 0));
-            int uCount = Mathf.CeilToInt((float)width / kTileSize);
-            int vCount = Mathf.CeilToInt((float)height / kTileSize);
-            int vertexCount = (uCount + 1) * (vCount + 1);
-            int indexCount = uCount * vCount * 6;
+            tileNumX = Mathf.CeilToInt((float)width / kTileSize);
+            tileNumY = Mathf.CeilToInt((float)height / kTileSize);
+            int vertexCount = (tileNumX + 1) * (tileNumY + 1);
+            int indexCount = tileNumX * tileNumY * 6;
             Mesh mesh = new Mesh{ name = "Fullscreen Mesh" };
             mesh.vertexBufferTarget |= GraphicsBuffer.Target.Raw;
                 
             mesh.SetVertexBufferParams(vertexCount, new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream:0));
             var posBuffer = new NativeArray<Vector3>(vertexCount, Allocator.Temp);
-            var uvBuffer = new NativeArray<Vector2>(vertexCount, Allocator.Temp);
-            for (int j = 0; j < vCount + 1; j++)
+            for (int j = 0; j < tileNumY + 1; j++)
             {
-                for (int i = 0; i < uCount + 1; i++)
+                for (int i = 0; i < tileNumX + 1; i++)
                 {
-                    posBuffer[j * (uCount + 1) + i] = new Vector3((i*kTileSize)/(float)width - 0.5f, (j*kTileSize)/(float)height - 0.5f , nearZ);
+                    posBuffer[j * (tileNumX + 1) + i] = new Vector3((i*kTileSize)/(float)width - 0.5f, (j*kTileSize)/(float)height - 0.5f , nearZ);
                 }
             }
                 
@@ -100,17 +114,17 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
             mesh.SetIndexBufferParams(indexCount, IndexFormat.UInt32);
             var indexBuffer = new NativeArray<int>(indexCount, Allocator.Temp);
             int index = 0;
-            for (int j = 0; j < vCount; j++)
+            for (int j = 0; j < tileNumY; j++)
             {
-                for (int i = 0; i < uCount; i++)
+                for (int i = 0; i < tileNumX; i++)
                 {
-                    indexBuffer[index++] = j * (uCount + 1) + i;
-                    indexBuffer[index++] = j * (uCount + 1) + (i + 1);
-                    indexBuffer[index++] = (j + 1) * (uCount + 1) + i;
+                    indexBuffer[index++] = j * (tileNumX + 1) + i;
+                    indexBuffer[index++] = j * (tileNumX + 1) + (i + 1);
+                    indexBuffer[index++] = (j + 1) * (tileNumX + 1) + i;
 
-                    indexBuffer[index++] = (j + 1) * (uCount + 1) + i;
-                    indexBuffer[index++] = j * (uCount + 1) + (i + 1);
-                    indexBuffer[index++] = (j + 1) * (uCount + 1) + (i + 1);
+                    indexBuffer[index++] = (j + 1) * (tileNumX + 1) + i;
+                    indexBuffer[index++] = j * (tileNumX + 1) + (i + 1);
+                    indexBuffer[index++] = (j + 1) * (tileNumX + 1) + (i + 1);
                 }
             }
             mesh.SetIndexBufferData(indexBuffer, 0, 0, indexBuffer.Length);
@@ -120,13 +134,27 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
             mesh.subMeshCount = 1;
             return mesh;
         }
+
+        private void UpdateMeshWithGPU(CommandBuffer cmd, RTHandle depthRT)
+        {
+            //computeShader.SetBuffer(0, "BufVertices", bufferPos);
+            //computeShader.Dispatch(0, (fullscreenMesh.vertexCount+kThreadCount)/kThreadCount, 1, 1);
+            if (debugComputeOutput && computeShader)
+            {
+                int kernelHandle = computeShader.FindKernel("ComputeGradiant");
+                cmd.SetComputeTextureParam(computeShader, kernelHandle, "_CameraDepthTexture", depthRT);
+                cmd.SetComputeTextureParam(computeShader, kernelHandle, "GradiantTexture", debugComputeOutput);
+                cmd.DispatchCompute(computeShader, kernelHandle, debugComputeOutput.width / kTileSize,
+                    debugComputeOutput.height / kTileSize, 1);
+            }
+        }
     }
 
     FullscreenMeshRenderPass m_ScriptablePass;
     /// <inheritdoc/>
     public override void Create()
     {
-        m_ScriptablePass = new FullscreenMeshRenderPass(passMaterial);
+        m_ScriptablePass = new FullscreenMeshRenderPass(passMaterial, computeShader);
 
         // Configures where the render pass should be injected.
         m_ScriptablePass.renderPassEvent = RenderPassEvent.AfterRenderingSkybox;

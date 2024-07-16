@@ -58,7 +58,7 @@ MonoBehaviour:
   m_ShadowTransparentReceive: 1
   m_RenderingMode: 0
   m_DepthPrimingMode: 0
-  m_CopyDepthMode: 1
+  m_CopyDepthMode: 0
   m_AccurateGbufferNormals: 0
   m_IntermediateTextureMode: 1
 --- !u!114 &2911765738409246125
@@ -73,5 +73,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 363b1faa7c1814886ae43fd73e491d67, type: 3}
   m_Name: FullscreenMeshRenderFeature
   m_EditorClassIdentifier: 
-  m_Active: 1
+  m_Active: 0
   passMaterial: {fileID: 2100000, guid: 68c2cfae2a1e24dfca5ae9fa488f12df, type: 2}
+  computeShader: {fileID: 7200000, guid: d4734ef61138b437ea1c7fef58960685, type: 3}
