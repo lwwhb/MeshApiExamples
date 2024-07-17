@@ -1,29 +1,13 @@
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityInput.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+#include "FramePredictionCommon.hlsl"
 
-#define TILE_SIZE 16
-struct Pixel
-{
-    uint2 pos;
-    float2 uv;
-    float gradiant;
-};
-struct Tile
-{
-    Pixel pixels[TILE_SIZE*TILE_SIZE];
-    uint2 maxGradiantPixel;
-};
 RWByteAddressBuffer BufVertices;
 RWTexture2D<float4> GradiantTexture;
-RWStructuredBuffer<uint2> CacheUAV;
 
 groupshared float DepthSamples[TILE_SIZE * TILE_SIZE];
 
 #pragma kernel ComputeGradiant
 [numthreads(TILE_SIZE,TILE_SIZE,1)]
-void ComputeGradiant (uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex, uint2 groupId : SV_GroupID, uint2 groupThreadId : SV_GroupThreadID)
+void ComputeGradiant (uint3 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex, uint2 groupThreadId : SV_GroupThreadID)
 {
     float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy).r;
     float rightDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(1, 0)).r;
@@ -32,14 +16,14 @@ void ComputeGradiant (uint3 id : SV_DispatchThreadID, uint groupIndex : SV_Group
     GradiantTexture[id.xy] = float4(gradiantSqSum*1000, 0, 0, 0);
 }
 
-#pragma kernel PredictFrame
+#pragma kernel FramePrediction
 
 [numthreads(TILE_SIZE,TILE_SIZE,1)]
-void PredictFrame (uint3 id : SV_DispatchThreadID)
+void FramePrediction (uint3 id : SV_DispatchThreadID)
 {
-    //float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy).r;
-    //float rightDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(1, 0)).r;
-    //float downDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(0, 1)).r;
-    //float gradiant = (rightDepth - depth)*(rightDepth - depth) + (downDepth - depth)*(downDepth - depth);
+    float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy).r;
+    float rightDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(1, 0)).r;
+    float downDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(0, 1)).r;
+    float gradiant = (rightDepth - depth)*(rightDepth - depth) + (downDepth - depth)*(downDepth - depth);
     //CacheUAV[id.xy].gradiant = gradiant;
 }

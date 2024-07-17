@@ -1,9 +1,5 @@
 Shader "Universal Render Pipeline/DrawFullscreenMesh"
 {
-    Properties
-    {
-        [MainTexture] _BaseMap("Albedo", 2D) = "white" {}
-    }
     SubShader
     {
         Tags { "RenderType" = "Opaque" "RenderPipeline" = "UniversalPipeline"}
@@ -20,17 +16,12 @@ Shader "Universal Render Pipeline/DrawFullscreenMesh"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-            
-            TEXTURE2D(_BaseMap);
-            SAMPLER(sampler_BaseMap);
+
+            #include "FramePredictionCommon.hlsl"
 
             struct Attributes
             {
-                float4 positionOS : POSITION;
-                float2 uv : TEXCOORD0;
+                uint vertexID : SV_VertexID;
             };
 
             struct Varyings
@@ -38,22 +29,39 @@ Shader "Universal Render Pipeline/DrawFullscreenMesh"
                 float4 positionCS               : SV_POSITION;
                 float2 uv                       : TEXCOORD0;
             };
-
-            float2 TransformTriangleVertexToUV(float2 vertex)
-            {
-                float2 uv = vertex*2.0f + 1.0f;
-                return vertex;
-            }
+            
             Varyings vert(Attributes input)
             {
                 Varyings output = (Varyings)0;
-                output.positionCS = float4(input.positionOS.xy, 0.0f, 0.5f);
-                output.uv = TransformTriangleVertexToUV(input.positionOS.xy);
+                uint2 vertexIdx = CalcuateVertexIndex2D(input.vertexID);
+                output.positionCS = CalculateVertexClipPos(vertexIdx);
+                output.uv = CalculateVertexUV(output.positionCS.xy);
 
                 #if UNITY_UV_STARTS_AT_TOP
                     output.uv = output.uv * float2(1.0, -1.0) + float2(0.0, 1.0);
                 #endif
-                
+
+                if(vertexIdx.x == 0)
+                {
+                    output.positionCS.x = -1;
+                    output.uv.x = 0;
+                }
+                if(vertexIdx.y == 0)
+                {
+                    output.positionCS.y = -1;
+                    output.uv.y = 0;
+                }
+                if(vertexIdx.x == _ScreenSize.x)
+                {
+                    output.positionCS.x = 1;
+                    output.uv.x = 1;
+                }
+                if(vertexIdx.y == _ScreenSize.y)
+                {
+                    output.positionCS.y = 1;
+                    output.uv.y = 1;
+                }
+
                 return output;
             }
             
