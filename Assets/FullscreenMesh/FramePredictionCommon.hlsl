@@ -8,43 +8,44 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityInput.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
 
+#include "FullscreenMeshRenderFeature.cs.hlsl"
+
 #define TILE_SIZE 16    //临时这么写，未来进变量
+#define EPSILON 0.00001
 
-struct Pixel
-{
-    uint2 pos;
-    float2 uv;
-    float gradiant;
-};
-struct Tile
-{
-    uint2 maxGradiantPixel;
-};
+RWTexture2D<float4> GradiantTexture;
+RWStructuredBuffer<TileInfo> BufTileInfos;
 
-RWStructuredBuffer<uint2> CacheUAV;
+RWByteAddressBuffer VertexPosBuffer;
+RWByteAddressBuffer VertexUVBuffer;
+
+RWTexture2D<float4> VertexTexture;
+
+float4 gTilesInfo;  // tileNumX, tileNumY, tileNumX+1, tileNumY+1
 
 uint2 CalcuateVertexIndex2D(uint vertexID)
 {
-    uint2 tilesDim = (uint2)ceil(_ScreenSize.xy / TILE_SIZE);
-    uint2 vertexDim = tilesDim + 1;
-    return uint2(vertexID % vertexDim.x, vertexID / vertexDim.x);
+    return uint2(vertexID % gTilesInfo.z, vertexID / gTilesInfo.z);
 }
 uint CalculateVertexID(uint2 vertexIdx2D)
 {
-    return vertexIdx2D.y * TILE_SIZE + vertexIdx2D.x;
+    return vertexIdx2D.y * gTilesInfo.z + vertexIdx2D.x;
 }
 
-float4 CalculateVertexClipPos(uint2 vertexIdx2D)
+float4 CalculateVertexClipPosAndUV(uint2 vertexIdx2D)
 {
-    float4 clipPos = float4(vertexIdx2D*TILE_SIZE*_ScreenSize.zw * 2.0f - 1.0f, UNITY_NEAR_CLIP_VALUE, 1.0f);
-    #ifdef UNITY_PRETRANSFORM_TO_DISPLAY_ORIENTATION
-        clipPos = ApplyPretransformRotation(pos);
-    #endif
-    return clipPos;
+    float2 uv = vertexIdx2D*TILE_SIZE*_ScreenSize.zw;
+    return float4(uv * 2.0f - 1.0f, uv);
 }
-float2 CalculateVertexUV(float2 clipPos)
+void StoreVertexPos(int index, float3 pos)
 {
-    return clipPos * 0.5f + 0.5f;
+    uint3 data = asuint(pos);
+    VertexPosBuffer.Store3((index*3)<<2, data);
+}
+void StoreVertexUV(int index, float2 uv)
+{
+    uint2 data = asuint(uv);
+    VertexUVBuffer.Store2((index*2)<<2, data);
 }
 
 #endif // FRAMEPREDICTION_COMMON_INCLUDED

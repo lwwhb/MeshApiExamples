@@ -1,13 +1,8 @@
 #include "FramePredictionCommon.hlsl"
 
-RWByteAddressBuffer BufVertices;
-RWTexture2D<float4> GradiantTexture;
-
-groupshared float DepthSamples[TILE_SIZE * TILE_SIZE];
-
 #pragma kernel ComputeGradiant
 [numthreads(TILE_SIZE,TILE_SIZE,1)]
-void ComputeGradiant (uint3 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex, uint2 groupThreadId : SV_GroupThreadID)
+void ComputeGradiant (uint3 id : SV_DispatchThreadID)
 {
     float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy).r;
     float rightDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(1, 0)).r;
@@ -16,14 +11,71 @@ void ComputeGradiant (uint3 id : SV_DispatchThreadID, uint2 groupId : SV_GroupID
     GradiantTexture[id.xy] = float4(gradiantSqSum*1000, 0, 0, 0);
 }
 
+#pragma kernel ComputeGradiantSqSum
+[numthreads(TILE_SIZE,TILE_SIZE,1)]
+void ComputeGradiantSqSum (uint2 groupId : SV_GroupID, uint2 groupThreadId : SV_GroupThreadID)
+{
+    uint2 tileIdx = uint2(groupId.x, gTilesInfo.y - 1 - groupId.y);
+    uint tileId = tileIdx.y*TILE_SIZE + tileIdx.x;
+    uint2 tilePixelIdx = uint2(groupThreadId.x, TILE_SIZE - 1 - groupThreadId.y);
+    uint2 globalPixelIdx = tileIdx * TILE_SIZE + tilePixelIdx;
+
+    float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, globalPixelIdx).r;
+    float rightDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, globalPixelIdx + int2(1, 0)).r;
+    float downDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, globalPixelIdx + int2(0, 1)).r;
+    float gradiantSqSum = (rightDepth - depth)*(rightDepth - depth) + (downDepth - depth)*(downDepth - depth);
+    
+    if(BufTileInfos[tileId].maxGradiantSqSum < gradiantSqSum)
+    {
+        BufTileInfos[tileId].maxGradiantSqSum = gradiantSqSum;
+        BufTileInfos[tileId].maxGradiantSqSumPixelIdx = globalPixelIdx;
+    }
+    else
+    {
+        BufTileInfos[tileId].maxGradiantSqSum = 0;
+    }
+    if(BufTileInfos[tileId].maxGradiantSqSum > EPSILON)
+    {
+        GradiantTexture[globalPixelIdx] = float4(1, 0, 0, 1);
+    }
+    else
+        GradiantTexture[globalPixelIdx] = float4(0, 0, 0, 1);
+}
+
 #pragma kernel FramePrediction
 
-[numthreads(TILE_SIZE,TILE_SIZE,1)]
+[numthreads(1,1,1)]
 void FramePrediction (uint3 id : SV_DispatchThreadID)
 {
-    float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy).r;
-    float rightDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(1, 0)).r;
-    float downDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(0, 1)).r;
-    float gradiant = (rightDepth - depth)*(rightDepth - depth) + (downDepth - depth)*(downDepth - depth);
-    //CacheUAV[id.xy].gradiant = gradiant;
+    uint2 vertexIdx = id.xy;
+    if(vertexIdx.x > (uint)gTilesInfo.x || vertexIdx.y > (uint)gTilesInfo.y)
+        return;
+    
+    float4 clipPosAndUV = CalculateVertexClipPosAndUV(vertexIdx);
+    float3 clipPos = float3(clipPosAndUV.xy, UNITY_NEAR_CLIP_VALUE);
+    float2 uv = clipPosAndUV.zw;
+
+    if(vertexIdx.x == 0)
+    {
+        clipPos.x = -1;
+        uv.x = 0;
+    }
+    if(vertexIdx.y == 0)
+    {
+        clipPos.y = -1;
+        uv.y = 0;
+    }
+    if(vertexIdx.x == (uint)gTilesInfo.x)
+    {
+        clipPos.x = 1;
+        uv.x = 1;
+    }
+    if(vertexIdx.y == (uint)gTilesInfo.y)
+    {
+        clipPos.y = 1;
+        uv.y = 1;
+    }
+    uint vertexId = CalculateVertexID(vertexIdx);
+    StoreVertexPos(vertexId, clipPos);
+    StoreVertexUV(vertexId, uv);
 }

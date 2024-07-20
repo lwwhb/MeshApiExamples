@@ -10,8 +10,20 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
     class FullscreenMeshRenderPass : ScriptableRenderPass
     {
         private const int kTileSize = 16;       //如果修改，还需同时修改对应Shader中的预定义，就不做变量传了
+        
+        [GenerateHLSL(needAccessors = false)]
+        struct TileInfo
+        {
+            public float maxGradiantSqSum;
+            public Vector2Int maxGradiantSqSumPixelIdx;
+        }
+        
         private Mesh fullscreenMesh { get; set; }
-        private GraphicsBuffer bufferVertexPos;
+        private GraphicsBuffer bufferTileInfos;
+        
+        private GraphicsBuffer vertexPosBuffer;
+        private GraphicsBuffer vertexUVBuffer;
+        
         
         private Material drawFullscreenMeshMaterial;
         private ComputeShader computeShader;
@@ -20,6 +32,7 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
         private int tileNumY;
 
         private RenderTexture debugComputeOutput = null;
+        private RenderTexture debugVertexOutput = null;
         
 
         public FullscreenMeshRenderPass( Material passMaterial, ComputeShader shader )
@@ -48,6 +61,20 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
                 debugComputeOutput.enableRandomWrite = true;
                 debugComputeOutput.Create();
             }
+
+            if (debugVertexOutput == null)
+            {
+                debugVertexOutput = new RenderTexture(cameraData.camera.pixelWidth/kTileSize + 1, cameraData.camera.pixelHeight/kTileSize + 1, 24);
+                debugVertexOutput.enableRandomWrite = true;
+                debugVertexOutput.filterMode = FilterMode.Point;
+                debugVertexOutput.Create();
+            }
+
+            if (bufferTileInfos == null)
+            {
+                bufferTileInfos = new GraphicsBuffer(GraphicsBuffer.Target.Structured, tileNumX * tileNumY,
+                    System.Runtime.InteropServices.Marshal.SizeOf<TileInfo>());
+            }
         }
 
         // Here you can implement the rendering logic.
@@ -60,8 +87,8 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
             CommandBuffer cmd = CommandBufferPool.Get();
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                //UpdateMeshWithGPU(cmd, cameraData.renderer.cameraDepthTargetHandle);
-                //cmd.Blit(debugComputeOutput, cameraData.renderer.cameraColorTargetHandle);
+                UpdateMeshWithGPU(cmd, cameraData.renderer.cameraDepthTargetHandle);
+                cmd.Blit(debugComputeOutput, cameraData.renderer.cameraColorTargetHandle);
                 cmd.DrawMesh(fullscreenMesh, Matrix4x4.identity, drawFullscreenMeshMaterial);
             }
             context.ExecuteCommandBuffer(cmd);
@@ -80,22 +107,41 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
                 DestroyImmediate(fullscreenMesh);
                 fullscreenMesh = null;
             }
-            bufferVertexPos?.Dispose();
-            bufferVertexPos = null;
+            if (debugComputeOutput)
+            {
+                DestroyImmediate(debugComputeOutput);
+                debugComputeOutput = null;
+            }
+
+            if (debugVertexOutput)
+            {
+                DestroyImmediate(debugVertexOutput);
+                debugVertexOutput = null;
+            }
+
+            bufferTileInfos?.Dispose();
+            bufferTileInfos = null;
+            vertexPosBuffer?.Dispose();
+            vertexPosBuffer = null;
+            vertexUVBuffer?.Dispose();
+            vertexUVBuffer = null;
         }
         
         private Mesh CreateFullscreenMesh(int width, int height)
         {
             Debug.Assert((width % kTileSize == 0) && (height % kTileSize == 0));
-            tileNumX = Mathf.CeilToInt((float)width / kTileSize);
-            tileNumY = Mathf.CeilToInt((float)height / kTileSize);
+            tileNumX = width / kTileSize;
+            tileNumY = height / kTileSize;
             int vertexCount = (tileNumX + 1) * (tileNumY + 1);
             int indexCount = tileNumX * tileNumY * 6;
             Mesh mesh = new Mesh{ name = "Fullscreen Mesh" };
             mesh.vertexBufferTarget |= GraphicsBuffer.Target.Raw;
-                
-            mesh.SetVertexBufferParams(vertexCount, new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream:0));
+            mesh.SetVertexBufferParams(vertexCount, 
+                new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream:0),
+                new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream:1));
+            
             mesh.SetIndexBufferParams(indexCount, IndexFormat.UInt32);
+            
             var indexBuffer = new NativeArray<int>(indexCount, Allocator.Temp);
             int index = 0;
             for (int j = 0; j < tileNumY; j++)
@@ -123,11 +169,23 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
         {
             if (debugComputeOutput && computeShader)
             {
-                int kernelHandle = computeShader.FindKernel("FramePrediction");
-                cmd.SetComputeTextureParam(computeShader, kernelHandle, "_CameraDepthTexture", depthRT);
-                cmd.SetComputeTextureParam(computeShader, kernelHandle, "GradiantTexture", debugComputeOutput);
-                cmd.DispatchCompute(computeShader, kernelHandle, debugComputeOutput.width / kTileSize,
+                cmd.SetComputeVectorParam(computeShader,"gTilesInfo", new Vector4(tileNumX, tileNumY, tileNumX+1, tileNumY+1));
+                
+                int gradiantSqSumKernelHandle = computeShader.FindKernel("ComputeGradiantSqSum");
+                cmd.SetComputeTextureParam(computeShader, gradiantSqSumKernelHandle, "_CameraDepthTexture", depthRT);
+                cmd.SetComputeTextureParam(computeShader, gradiantSqSumKernelHandle, "GradiantTexture", debugComputeOutput);
+                cmd.SetComputeBufferParam(computeShader, gradiantSqSumKernelHandle, "BufTileInfos", bufferTileInfos);
+                
+                cmd.DispatchCompute(computeShader, gradiantSqSumKernelHandle, debugComputeOutput.width / kTileSize,
                     debugComputeOutput.height / kTileSize, 1);
+                
+                int framePredictionKernelHandle = computeShader.FindKernel("FramePrediction");
+                vertexPosBuffer ??= fullscreenMesh.GetVertexBuffer(0);
+                vertexUVBuffer ??= fullscreenMesh.GetVertexBuffer(1);
+                cmd.SetComputeBufferParam(computeShader, framePredictionKernelHandle, "VertexPosBuffer", vertexPosBuffer);
+                cmd.SetComputeBufferParam(computeShader, framePredictionKernelHandle, "VertexUVBuffer", vertexUVBuffer);
+                cmd.DispatchCompute(computeShader, framePredictionKernelHandle, (tileNumX+1),
+                    (tileNumY+1), 1);
             }
         }
     }
