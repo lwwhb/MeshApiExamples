@@ -182,6 +182,7 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
                 int framePredictionKernelHandle = computeShader.FindKernel("FramePrediction");
                 vertexPosBuffer ??= fullscreenMesh.GetVertexBuffer(0);
                 vertexUVBuffer ??= fullscreenMesh.GetVertexBuffer(1);
+                //cmd.SetComputeTextureParam(computeShader, framePredictionKernelHandle, "VertexTexture", debugVertexOutput);
                 cmd.SetComputeBufferParam(computeShader, framePredictionKernelHandle, "VertexPosBuffer", vertexPosBuffer);
                 cmd.SetComputeBufferParam(computeShader, framePredictionKernelHandle, "VertexUVBuffer", vertexUVBuffer);
                 cmd.DispatchCompute(computeShader, framePredictionKernelHandle, (tileNumX+1),

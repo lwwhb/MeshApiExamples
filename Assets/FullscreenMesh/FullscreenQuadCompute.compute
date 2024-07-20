@@ -47,7 +47,7 @@ void ComputeGradiantSqSum (uint2 groupId : SV_GroupID, uint2 groupThreadId : SV_
 [numthreads(1,1,1)]
 void FramePrediction (uint3 id : SV_DispatchThreadID)
 {
-    uint2 vertexIdx = id.xy;
+    uint2 vertexIdx = uint2(id.x, (uint)gTilesInfo.y - id.y);
     if(vertexIdx.x > (uint)gTilesInfo.x || vertexIdx.y > (uint)gTilesInfo.y)
         return;
     
@@ -75,6 +75,7 @@ void FramePrediction (uint3 id : SV_DispatchThreadID)
         clipPos.y = 1;
         uv.y = 1;
     }
+    //VertexTexture[id.xy] = float4(clipPos, 1);
     uint vertexId = CalculateVertexID(vertexIdx);
     StoreVertexPos(vertexId, clipPos);
     StoreVertexUV(vertexId, uv);
