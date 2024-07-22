@@ -11,13 +11,6 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
     {
         private const int kTileSize = 16;       //如果修改，还需同时修改对应Shader中的预定义，就不做变量传了
         
-        [GenerateHLSL(needAccessors = false)]
-        struct TileInfo
-        {
-            public float maxGradiantSqSum;
-            public Vector2Int maxGradiantSqSumPixelIdx;
-        }
-        
         private Mesh fullscreenMesh { get; set; }
         
         private GraphicsBuffer vertexPosBuffer;
@@ -173,7 +166,7 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
                 vertexPosBuffer ??= fullscreenMesh.GetVertexBuffer(0);
                 vertexUVBuffer ??= fullscreenMesh.GetVertexBuffer(1);
                 cmd.SetComputeTextureParam(computeShader, framePredictionKernelHandle, "_CameraDepthTexture", depthRT);
-                cmd.SetComputeTextureParam(computeShader, framePredictionKernelHandle, "GradiantTexture", debugComputeOutput);
+                cmd.SetComputeTextureParam(computeShader, framePredictionKernelHandle, "GradiantSqSumTexture", debugComputeOutput);
                 cmd.SetComputeTextureParam(computeShader, framePredictionKernelHandle, "VertexTexture", debugVertexOutput);
                 cmd.SetComputeBufferParam(computeShader, framePredictionKernelHandle, "VertexPosBuffer", vertexPosBuffer);
                 cmd.SetComputeBufferParam(computeShader, framePredictionKernelHandle, "VertexUVBuffer", vertexUVBuffer);

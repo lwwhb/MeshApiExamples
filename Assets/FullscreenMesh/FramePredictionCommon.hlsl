@@ -8,25 +8,18 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityInput.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
 
-#include "FullscreenMeshRenderFeature.cs.hlsl"
-
 #define TILE_SIZE 16    //临时这么写，未来进变量
 #define EPSILON 0.00001
 
-RWTexture2D<float4> GradiantTexture;
+RWTexture2D<float4> GradiantSqSumTexture;
+RWTexture2D<float4> VertexTexture;
 
 RWByteAddressBuffer VertexPosBuffer;
 RWByteAddressBuffer VertexUVBuffer;
 
-RWTexture2D<float4> VertexTexture;
-
 float4 gTilesInfo;  // tileNumX, tileNumY, tileNumX+1, tileNumY+1
 matrix gGpuVP;
 
-uint2 CalcuateVertexIndex2D(uint vertexID)
-{
-    return uint2(vertexID % gTilesInfo.z, vertexID / gTilesInfo.z);
-}
 uint CalculateVertexID(uint2 vertexIdx2D)
 {
     return vertexIdx2D.y * gTilesInfo.z + vertexIdx2D.x;

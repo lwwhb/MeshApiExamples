@@ -27,11 +27,8 @@ void FramePrediction (uint3 id : SV_DispatchThreadID)
                 maxGradiantSqSum = gradiantSqSum;
                 maxGradiantSqSumPixelIdx = globalPixelIdx;
             }
-            if(maxGradiantSqSum > 0)
-                GradiantTexture[globalPixelIdx] = float4(1, 0, 0, 1);
-            else
-                GradiantTexture[globalPixelIdx] = float4(0, 1, 0, 1);
-            GradiantTexture[globalPixelIdx] = float4(gradiantSqSum * 1000, 0, 0, 1);
+            //Debug
+            GradiantSqSumTexture[globalPixelIdx] = float4(gradiantSqSum * 1000, 0, 0, 1);
         }
     
     float4 clipPosAndUV;
@@ -45,7 +42,7 @@ void FramePrediction (uint3 id : SV_DispatchThreadID)
     clipPos = mul(gGpuVP, float4(posWS.xyz, 1.0));
     
     float2 uv = clipPosAndUV.zw;
-    
+    //Debug
     VertexTexture[vertexIdx] = float4(clipPos.xyz, 1.0);
     if(vertexIdx.x == 0)
     {
