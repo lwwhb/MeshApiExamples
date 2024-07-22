@@ -19,7 +19,6 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
         }
         
         private Mesh fullscreenMesh { get; set; }
-        private GraphicsBuffer bufferTileInfos;
         
         private GraphicsBuffer vertexPosBuffer;
         private GraphicsBuffer vertexUVBuffer;
@@ -69,12 +68,7 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
                 debugVertexOutput.filterMode = FilterMode.Point;
                 debugVertexOutput.Create();
             }
-
-            if (bufferTileInfos == null)
-            {
-                bufferTileInfos = new GraphicsBuffer(GraphicsBuffer.Target.Structured, tileNumX * tileNumY,
-                    System.Runtime.InteropServices.Marshal.SizeOf<TileInfo>());
-            }
+            
         }
 
         // Here you can implement the rendering logic.
@@ -87,8 +81,8 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
             CommandBuffer cmd = CommandBufferPool.Get();
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                UpdateMeshWithGPU(cmd, cameraData.renderer.cameraDepthTargetHandle);
-                cmd.Blit(debugComputeOutput, cameraData.renderer.cameraColorTargetHandle);
+                UpdateMeshWithGPU(cmd, cameraData);
+                cmd.Blit(debugVertexOutput, cameraData.renderer.cameraColorTargetHandle);
                 cmd.DrawMesh(fullscreenMesh, Matrix4x4.identity, drawFullscreenMeshMaterial);
             }
             context.ExecuteCommandBuffer(cmd);
@@ -118,9 +112,7 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
                 DestroyImmediate(debugVertexOutput);
                 debugVertexOutput = null;
             }
-
-            bufferTileInfos?.Dispose();
-            bufferTileInfos = null;
+            
             vertexPosBuffer?.Dispose();
             vertexPosBuffer = null;
             vertexUVBuffer?.Dispose();
@@ -165,24 +157,24 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
             return mesh;
         }
 
-        private void UpdateMeshWithGPU(CommandBuffer cmd, RTHandle depthRT)
+        private void UpdateMeshWithGPU(CommandBuffer cmd, CameraData cameraData)
         {
             if (debugComputeOutput && computeShader)
             {
+                RTHandle depthRT = cameraData.renderer.cameraDepthTargetHandle;
+                var gpuP = GL.GetGPUProjectionMatrix(cameraData.GetProjectionMatrix(), true);
+                var gpuV = cameraData.GetViewMatrix();
+                var gpuVP = gpuP * gpuV;
+                
+                cmd.SetComputeMatrixParam(computeShader, "gGpuVP", gpuVP);
                 cmd.SetComputeVectorParam(computeShader,"gTilesInfo", new Vector4(tileNumX, tileNumY, tileNumX+1, tileNumY+1));
-                
-                int gradiantSqSumKernelHandle = computeShader.FindKernel("ComputeGradiantSqSum");
-                cmd.SetComputeTextureParam(computeShader, gradiantSqSumKernelHandle, "_CameraDepthTexture", depthRT);
-                cmd.SetComputeTextureParam(computeShader, gradiantSqSumKernelHandle, "GradiantTexture", debugComputeOutput);
-                cmd.SetComputeBufferParam(computeShader, gradiantSqSumKernelHandle, "BufTileInfos", bufferTileInfos);
-                
-                cmd.DispatchCompute(computeShader, gradiantSqSumKernelHandle, debugComputeOutput.width / kTileSize,
-                    debugComputeOutput.height / kTileSize, 1);
                 
                 int framePredictionKernelHandle = computeShader.FindKernel("FramePrediction");
                 vertexPosBuffer ??= fullscreenMesh.GetVertexBuffer(0);
                 vertexUVBuffer ??= fullscreenMesh.GetVertexBuffer(1);
-                //cmd.SetComputeTextureParam(computeShader, framePredictionKernelHandle, "VertexTexture", debugVertexOutput);
+                cmd.SetComputeTextureParam(computeShader, framePredictionKernelHandle, "_CameraDepthTexture", depthRT);
+                cmd.SetComputeTextureParam(computeShader, framePredictionKernelHandle, "GradiantTexture", debugComputeOutput);
+                cmd.SetComputeTextureParam(computeShader, framePredictionKernelHandle, "VertexTexture", debugVertexOutput);
                 cmd.SetComputeBufferParam(computeShader, framePredictionKernelHandle, "VertexPosBuffer", vertexPosBuffer);
                 cmd.SetComputeBufferParam(computeShader, framePredictionKernelHandle, "VertexUVBuffer", vertexUVBuffer);
                 cmd.DispatchCompute(computeShader, framePredictionKernelHandle, (tileNumX+1),

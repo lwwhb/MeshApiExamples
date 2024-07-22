@@ -1,60 +1,52 @@
 #include "FramePredictionCommon.hlsl"
-
-#pragma kernel ComputeGradiant
-[numthreads(TILE_SIZE,TILE_SIZE,1)]
-void ComputeGradiant (uint3 id : SV_DispatchThreadID)
-{
-    float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy).r;
-    float rightDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(1, 0)).r;
-    float downDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, id.xy + int2(0, 1)).r;
-    float gradiantSqSum = (rightDepth - depth)*(rightDepth - depth) + (downDepth - depth)*(downDepth - depth);
-    GradiantTexture[id.xy] = float4(gradiantSqSum*1000, 0, 0, 0);
-}
-
-#pragma kernel ComputeGradiantSqSum
-[numthreads(TILE_SIZE,TILE_SIZE,1)]
-void ComputeGradiantSqSum (uint2 groupId : SV_GroupID, uint2 groupThreadId : SV_GroupThreadID)
-{
-    uint2 tileIdx = uint2(groupId.x, gTilesInfo.y - 1 - groupId.y);
-    uint tileId = tileIdx.y*TILE_SIZE + tileIdx.x;
-    uint2 tilePixelIdx = uint2(groupThreadId.x, TILE_SIZE - 1 - groupThreadId.y);
-    uint2 globalPixelIdx = tileIdx * TILE_SIZE + tilePixelIdx;
-
-    float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, globalPixelIdx).r;
-    float rightDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, globalPixelIdx + int2(1, 0)).r;
-    float downDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, globalPixelIdx + int2(0, 1)).r;
-    float gradiantSqSum = (rightDepth - depth)*(rightDepth - depth) + (downDepth - depth)*(downDepth - depth);
-    
-    if(BufTileInfos[tileId].maxGradiantSqSum < gradiantSqSum)
-    {
-        BufTileInfos[tileId].maxGradiantSqSum = gradiantSqSum;
-        BufTileInfos[tileId].maxGradiantSqSumPixelIdx = globalPixelIdx;
-    }
-    else
-    {
-        BufTileInfos[tileId].maxGradiantSqSum = 0;
-    }
-    if(BufTileInfos[tileId].maxGradiantSqSum > EPSILON)
-    {
-        GradiantTexture[globalPixelIdx] = float4(1, 0, 0, 1);
-    }
-    else
-        GradiantTexture[globalPixelIdx] = float4(0, 0, 0, 1);
-}
-
 #pragma kernel FramePrediction
-
 [numthreads(1,1,1)]
 void FramePrediction (uint3 id : SV_DispatchThreadID)
 {
-    uint2 vertexIdx = uint2(id.x, (uint)gTilesInfo.y - id.y);
+    uint2 vertexIdx = id.xy;
     if(vertexIdx.x > (uint)gTilesInfo.x || vertexIdx.y > (uint)gTilesInfo.y)
         return;
-    
-    float4 clipPosAndUV = CalculateVertexClipPosAndUV(vertexIdx);
-    float3 clipPos = float3(clipPosAndUV.xy, UNITY_NEAR_CLIP_VALUE);
-    float2 uv = clipPosAndUV.zw;
 
+    uint2 maxGradiantSqSumPixelIdx;
+    float maxGradiantSqSum = 0;;
+    for (uint j = 0; j < TILE_SIZE; j++)
+        for (uint i = 0; i < TILE_SIZE; i++)
+        {
+            uint2 globalPixelIdx = vertexIdx*TILE_SIZE + uint2(i, j);
+            float depth = LOAD_TEXTURE2D_X(_CameraDepthTexture, globalPixelIdx).r;
+            
+            float rightDepth = depth;
+            if(globalPixelIdx.x + 1 < (uint)_ScreenSize.x)
+                rightDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, globalPixelIdx + int2(1, 0)).r;
+            float downDepth = depth;
+            if(globalPixelIdx.y + 1 < (uint)_ScreenSize.y)
+                downDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, globalPixelIdx + int2(0, 1)).r;
+            float gradiantSqSum = (rightDepth - depth)*(rightDepth - depth) + (downDepth - depth)*(downDepth - depth);
+            if(gradiantSqSum > maxGradiantSqSum)
+            {
+                maxGradiantSqSum = gradiantSqSum;
+                maxGradiantSqSumPixelIdx = globalPixelIdx;
+            }
+            if(maxGradiantSqSum > 0)
+                GradiantTexture[globalPixelIdx] = float4(1, 0, 0, 1);
+            else
+                GradiantTexture[globalPixelIdx] = float4(0, 1, 0, 1);
+            GradiantTexture[globalPixelIdx] = float4(gradiantSqSum * 1000, 0, 0, 1);
+        }
+    
+    float4 clipPosAndUV;
+    if(maxGradiantSqSum > 0)
+        clipPosAndUV = CalculatePixelClipPosAndUV(maxGradiantSqSumPixelIdx);
+    else
+        clipPosAndUV = CalculateVertexClipPosAndUV(vertexIdx);
+    float4 clipPos = float4(clipPosAndUV.xy, UNITY_NEAR_CLIP_VALUE, 1);
+
+    float3 posWS = ComputeWorldSpacePosition(clipPos, UNITY_MATRIX_I_VP);
+    clipPos = mul(gGpuVP, float4(posWS.xyz, 1.0));
+    
+    float2 uv = clipPosAndUV.zw;
+    
+    VertexTexture[vertexIdx] = float4(clipPos.xyz, 1.0);
     if(vertexIdx.x == 0)
     {
         clipPos.x = -1;
@@ -62,8 +54,8 @@ void FramePrediction (uint3 id : SV_DispatchThreadID)
     }
     if(vertexIdx.y == 0)
     {
-        clipPos.y = -1;
-        uv.y = 0;
+        clipPos.y = 1;
+        uv.y = 1;
     }
     if(vertexIdx.x == (uint)gTilesInfo.x)
     {
@@ -72,11 +64,10 @@ void FramePrediction (uint3 id : SV_DispatchThreadID)
     }
     if(vertexIdx.y == (uint)gTilesInfo.y)
     {
-        clipPos.y = 1;
-        uv.y = 1;
+        clipPos.y = -1;
+        uv.y = 0;
     }
-    //VertexTexture[id.xy] = float4(clipPos, 1);
     uint vertexId = CalculateVertexID(vertexIdx);
-    StoreVertexPos(vertexId, clipPos);
+    StoreVertexPos(vertexId, clipPos.xyz);
     StoreVertexUV(vertexId, uv);
 }

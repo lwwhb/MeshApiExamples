@@ -37,9 +37,6 @@ Shader "Universal Render Pipeline/DrawFullscreenMesh"
                 Varyings output = (Varyings)0;
                 output.positionCS = float4(input.positionOS.xyz, 1.0f);
                 output.uv = input.uv;
-                #if UNITY_UV_STARTS_AT_TOP
-                    output.uv = output.uv * float2(1.0, -1.0) + float2(0.0, 1.0);
-                #endif
                 output.color = float4(1,1,0,1);
                 return output;
             }

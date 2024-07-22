@@ -14,7 +14,6 @@
 #define EPSILON 0.00001
 
 RWTexture2D<float4> GradiantTexture;
-RWStructuredBuffer<TileInfo> BufTileInfos;
 
 RWByteAddressBuffer VertexPosBuffer;
 RWByteAddressBuffer VertexUVBuffer;
@@ -22,6 +21,7 @@ RWByteAddressBuffer VertexUVBuffer;
 RWTexture2D<float4> VertexTexture;
 
 float4 gTilesInfo;  // tileNumX, tileNumY, tileNumX+1, tileNumY+1
+matrix gGpuVP;
 
 uint2 CalcuateVertexIndex2D(uint vertexID)
 {
@@ -35,6 +35,18 @@ uint CalculateVertexID(uint2 vertexIdx2D)
 float4 CalculateVertexClipPosAndUV(uint2 vertexIdx2D)
 {
     float2 uv = vertexIdx2D*TILE_SIZE*_ScreenSize.zw;
+    #if UNITY_UV_STARTS_AT_TOP
+        uv = uv * float2(1.0, -1.0) + float2(0.0, 1.0);
+    #endif
+    return float4(uv * 2.0f - 1.0f, uv);
+}
+
+float4 CalculatePixelClipPosAndUV(uint2 pixelIdx2D)
+{
+    float2 uv = pixelIdx2D *_ScreenSize.zw;
+    #if UNITY_UV_STARTS_AT_TOP
+        uv = uv * float2(1.0, -1.0) + float2(0.0, 1.0);
+    #endif
     return float4(uv * 2.0f - 1.0f, uv);
 }
 void StoreVertexPos(int index, float3 pos)
