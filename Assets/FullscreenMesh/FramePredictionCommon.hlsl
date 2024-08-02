@@ -18,7 +18,6 @@ RWByteAddressBuffer VertexPosBuffer;
 RWByteAddressBuffer VertexUVBuffer;
 
 float4 gTilesInfo;  // tileNumX, tileNumY, tileNumX+1, tileNumY+1
-matrix gGpuVP;
 
 uint CalculateVertexID(uint2 vertexIdx2D)
 {

@@ -37,9 +37,6 @@ void FramePrediction (uint3 id : SV_DispatchThreadID)
     else
         clipPosAndUV = CalculateVertexClipPosAndUV(vertexIdx);
     float4 clipPos = float4(clipPosAndUV.xy, UNITY_NEAR_CLIP_VALUE, 1);
-
-    float3 posWS = ComputeWorldSpacePosition(clipPos, UNITY_MATRIX_I_VP);
-    clipPos = mul(gGpuVP, float4(posWS.xyz, 1.0));
     
     float2 uv = clipPosAndUV.zw;
     //Debug

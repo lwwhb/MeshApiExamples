@@ -6,7 +6,7 @@ Shader "Universal Render Pipeline/DrawFullscreenMesh"
         LOD 100
         
         ZTest Always
-        ZWrite True
+        ZWrite On
         Cull Off
         
         Pass

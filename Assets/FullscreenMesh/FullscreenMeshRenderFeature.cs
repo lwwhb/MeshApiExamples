@@ -155,11 +155,6 @@ public class FullscreenMeshRenderFeature : ScriptableRendererFeature
             if (debugComputeOutput && computeShader)
             {
                 RTHandle depthRT = cameraData.renderer.cameraDepthTargetHandle;
-                var gpuP = GL.GetGPUProjectionMatrix(cameraData.GetProjectionMatrix(), true);
-                var gpuV = cameraData.GetViewMatrix();
-                var gpuVP = gpuP * gpuV;
-                
-                cmd.SetComputeMatrixParam(computeShader, "gGpuVP", gpuVP);
                 cmd.SetComputeVectorParam(computeShader,"gTilesInfo", new Vector4(tileNumX, tileNumY, tileNumX+1, tileNumY+1));
                 
                 int framePredictionKernelHandle = computeShader.FindKernel("FramePrediction");
